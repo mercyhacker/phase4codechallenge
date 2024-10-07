@@ -1,50 +1,66 @@
-from random import choice as rc
+from random import randint,choice as rc
+import random
+from faker import Faker
 
 from app import app
-from models import db, Hero, Power, HeroPower
+from models import db,Power,Hero,HeroPowers
 
-if __name__ == '__main__':
-    with app.app_context():
-        print("Clearing db...")
-        Power.query.delete()
-        Hero.query.delete()
-        HeroPower.query.delete()
+fake=Faker()
 
-        print("Seeding powers...")
-        powers = [
-            Power(name="super strength", description="gives the wielder super-human strengths"),
-            Power(name="flight", description="gives the wielder the ability to fly through the skies at supersonic speed"),
-            Power(name="super human senses", description="allows the wielder to use her senses at a super-human level"),
-            Power(name="elasticity", description="can stretch the human body to extreme lengths"),
+with app.app_context():
+    #clearing the existing data
+    HeroPowers.query.delete()
+    Hero.query.delete()
+    Power.query.delete()
+
+#seeding hero
+    heros=[] #empty list to store the heros
+    for i in range(10):
+        b=Hero(name=fake.name(),
+                     super_name=fake.name())
+        heros.append(b)
+    
+    db.session.add_all(heros)
+    db.session.commit()
+    
+    #seeding powers
+    powers = []
+    power_data = [
+            ('Super Strength', 'This power grants immense physical strength.'),
+            ('Flight', 'The ability to soar through the skies at will.'),
+            ('Telekinesis', 'Move objects with the power of your mind.'),
+            ('Invisibility', 'Become invisible to the naked eye.'),
+            ('X-ray Vision', 'See through solid objects.'),
+            ('Fire Manipulation', 'Control and create fire at your will.'),
+            ('Ice Control', 'Command the power of ice and cold.'),
+            ('Time Travel', 'Travel through time and alter the past or future.'),
+            ('Teleportation', 'Instantly transport yourself to any location.'),
+            ('Mind Reading', 'Read the thoughts of others with ease.'),
         ]
 
-        db.session.add_all(powers)
-
-        print("Seeding heroes...")
-        heroes = [
-            Hero(name="Kamala Khan", super_name="Ms. Marvel"),
-            Hero(name="Doreen Green", super_name="Squirrel Girl"),
-            Hero(name="Gwen Stacy", super_name="Spider-Gwen"),
-            Hero(name="Janet Van Dyne", super_name="The Wasp"),
-            Hero(name="Wanda Maximoff", super_name="Scarlet Witch"),
-            Hero(name="Carol Danvers", super_name="Captain Marvel"),
-            Hero(name="Jean Grey", super_name="Dark Phoenix"),
-            Hero(name="Ororo Munroe", super_name="Storm"),
-            Hero(name="Kitty Pryde", super_name="Shadowcat"),
-            Hero(name="Elektra Natchios", super_name="Elektra"),
-        ]
-
-        db.session.add_all(heroes)
-
-        print("Adding powers to heroes...")
-        strengths = ["Strong", "Weak", "Average"]
-        hero_powers = []
-        for hero in heroes:
-            power = rc(powers)
-            hero_powers.append(
-                HeroPower(hero=hero, power=power, strength=rc(strengths))
+    for name, description in power_data:
+            power = Power(
+                name=name,
+                description=description,
             )
-        db.session.add_all(hero_powers)
-        db.session.commit()
+            powers.append(power)
 
-        print("Done seeding!")
+    db.session.add_all(powers)
+    db.session.commit()
+
+
+ #seeding heropowers
+    heropowers=[] #empty list to store the heropowers
+    strength_names=['Strong', 'Weak', 'Average']
+
+
+    for i in range(10):
+        hero=rc(heros)
+        power=rc(powers)
+        b=HeroPowers(strength = random.choice(strength_names),hero=hero,power=power)
+        heropowers.append(b)
+    
+    db.session.add_all(heropowers)
+    db.session.commit()
+    
+    print('seeding completed ')
