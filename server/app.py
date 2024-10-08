@@ -1,14 +1,16 @@
-#!/usr/bin/env python3
-
-from flask import Flask, request, make_response
+from flask import Flask, request, jsonify
 from flask_migrate import Migrate
 from flask_restful import Api, Resource
 from models import db, Hero, Power, HeroPower
 import os
+import logging
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-DATABASE = os.environ.get(
-    "DB_URI", f"sqlite:///{os.path.join(BASE_DIR, 'app.db')}")
+DATABASE = os.environ.get("DB_URI", f"sqlite:///{os.path.join(BASE_DIR, 'app.db')}")
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE
@@ -16,154 +18,104 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.json.compact = False
 
 migrate = Migrate(app, db)
-
 db.init_app(app)
+
+api = Api(app)
+
+class Heroes(Resource):
+    def get(self):
+        heroes = [hero.to_dict(only=('id', 'name', 'super_name')) for hero in Hero.query.all()]
+        return heroes, 200
+
+class HeroById(Resource):
+    def get(self, id):
+        hero = db.session.get(Hero, id)  
+        if hero:
+            return hero.to_dict(rules=('-hero_powers.hero',)), 200
+        return {"error": "Hero not found"}, 404
+
+class Powers(Resource):
+    def get(self):
+        powers = [power.to_dict(only=('id', 'name', 'description')) for power in Power.query.all()]
+        return powers, 200
+
+class PowerById(Resource):
+    def get(self, id):
+        power = db.session.get(Power, id)  
+        if power:
+            return power.to_dict(only=('id', 'name', 'description')), 200
+        return {"error": "Power not found"}, 404
+
+    def patch(self, id):
+        power = db.session.get(Power, id) 
+        if not power:
+            return {"error": "Power not found"}, 404
+        data = request.get_json()
+        if 'description' in data:
+            if len(data['description']) < 20:
+                return {"errors": ["validation errors"]}, 400
+            power.description = data['description']
+            db.session.commit()
+            return power.to_dict(only=('id', 'name', 'description')), 200
+        return {"errors": ["validation errors"]}, 400
+
+class HeroPowers(Resource):
+    def post(self):
+        data = request.get_json()
+        required_fields = ['strength', 'hero_id', 'power_id']
+        missing_fields = [field for field in required_fields if field not in data]
+
+        # validate presence of required fields
+        if missing_fields:
+            return {"errors": [f"Missing field: {field}" for field in missing_fields]}, 400
+
+        # validate 'strength' value
+        if data['strength'] not in ['Strong', 'Weak', 'Average']:
+            return {"errors": ["validation errors"]}, 400
+
+        try:
+            # Validate existence of Hero and Power
+            hero = db.session.get(Hero, data['hero_id']) 
+            power = db.session.get(Power, data['power_id'])  
+
+            if not hero or not power:
+                return {"errors": ["Invalid 'hero_id' or 'power_id'"]}, 400
+
+            # creation of new HeroPower
+            new_hero_power = HeroPower(
+                strength=data['strength'],
+                hero_id=data['hero_id'],
+                power_id=data['power_id']
+            )
+            db.session.add(new_hero_power)
+            db.session.commit()
+
+            # serialize the new HeroPower along with related Hero and Power
+            response_data = {
+                'id': new_hero_power.id,
+                'strength': new_hero_power.strength,
+                'hero_id': new_hero_power.hero_id,
+                'power_id': new_hero_power.power_id,
+                'hero': hero.to_dict(rules=('-hero_powers.hero',)),
+                'power': power.to_dict(rules=('-hero_powers.power',))
+            }
+
+            return response_data, 200 
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error creating HeroPower: {e}")
+            return {"errors": ["validation errors"]}, 400
+
+api.add_resource(Heroes, '/heroes')
+api.add_resource(HeroById, '/heroes/<int:id>')
+api.add_resource(Powers, '/powers')
+api.add_resource(PowerById, '/powers/<int:id>')
+api.add_resource(HeroPowers, '/hero_powers')
 
 @app.route('/')
 def index():
-    return '<h1>Code challenge</h1>'
-
-#  creating a route that Gets all the heroes
-@app.route("/heroes", methods = ["GET"])
-def heroes():
-    #  creating a list comprehension to get all heroes using the to_dict() method
-    heroes_list = [hero.to_dict() for hero in Hero.query.all()]
-    #  creating a response
-    response = make_response(heroes_list, 200)
-    return response
-
-# creating a route that gets the heroes by id
-@app.route("/heroes/<int:id>", methods = ["GET"])
-def get_hero_by_id(id):
-    # querying the table to get the hero by the id
-    hero = Hero.query.filter_by(id = id).first()
-    if hero:
-        # querying the HeroPower model. 
-        hero_powers = HeroPower.query.filter_by(hero_id = id).all()
-        # creating a dictionary for the hero using the to_dict()
-        hero_dict = hero.to_dict()
-        # creating a list that will hold the hero powers
-        hero_dict["hero_powers"] = [hero_power.to_dict() for hero_power in hero_powers ]
-            
-        #  creating a response
-        response = make_response(hero_dict, 200)
-        return response
-    else:
-        response_body = {
-            "error": "Hero not found"
-        }
-        response = make_response(response_body, 404)
-
-        return response
-
-# creating a route that Gets all powers
-@app.route("/powers", methods = ["GET"])
-def powers():
-    #  creating a list comprehension to get all powers using the to_dict() method
-    powers = [power.to_dict() for power in Power.query.all()]
-    #  creating a response
-    response = make_response(powers, 200)
-    return response
-
-# creating a route that gets the powers by id
-@app.route("/powers/<int:id>", methods = ["GET", "PATCH"])
-def get_powers_by_id(id):
-    # querying the Power model and filtering it by the id
-    power = Power.query.filter_by(id = id).first()
-    if power == None:
-        response_body = {
-            "error": "Power not found"
-        }
-        response = make_response(response_body, 404)
-        return response
-    else:
-        if request.method == "GET":
-            # creating a dictionary using to_dict() method
-            power_dict = power.to_dict()
-            # creating a response
-            response = make_response(power_dict, 200)
-            return response
-        elif request.method == "PATCH":
-            # getting data from the request
-            data = request.get_json()
-            # getting the description
-            description = data.get("description")
-            # checking if the description has a minimum length of 20 characters- if not so then raise an error
-            if len(description) < 20:
-                response_body = {
-                "errors": ["validation errors"]
-                }
-                response = make_response(response_body, 400)
-                return response
-            else:
-                power.description = description
-            # commiting to the database if the power has been updated and throwing an error if it has not been updated
-            if power:
-                db.session.add(power)
-                db.session.commit()
-                # creating a dictionary
-                power_dict = power.to_dict()
-
-                # creating a response 
-                response = make_response(power_dict, 200)
-                return response
-            else:
-                response_body = {
-                "errors": ["validation errors"]
-                }
-                response = make_response(response_body, 400)
-                return response
-
-
-# creating a method that posts the heroes
-@app.route("/hero_powers", methods = ["POST"])
-def hero_powers():
-    # getting data from the request
-    data = request.get_json()
-
-    # Giving the acceptable lists of strengths in a dictionary since data will be in json format
-    strenghts = {"Strong", "Weak", "Average"}
-    #  checking if the strengths exist in the strengths list
-    if "strength" not in data or data["strength"] not in strenghts:
-        response_body = {
-            "errors": ["validation errors"]
-            }
-        response = make_response(response_body, 400)
-        return response
-    
-    # creating a new hero power instance witn the data provided
-    new_power = HeroPower(
-        strength =data["strength"],
-        power_id=data["power_id"],
-        hero_id=data["hero_id"],
-    )
-
-    #  validating the new power before adding 
-    if new_power:
-        # add and commit to the database
-        db.session.add(new_power)
-        db.session.commit()
-
-        # creating a dictionary
-        hero_power_dict = new_power.to_dict()
-
-        # creating a response 
-        response = make_response(hero_power_dict, 200)
-        return response
-    else:
-        response_body = {
-            "errors": ["validation errors"]
-            }
-        response = make_response(response_body, 400)
-        return response
-
-    
-
-
-
-
-
-
+    return 'Code challenge'
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
